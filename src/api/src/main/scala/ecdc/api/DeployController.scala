@@ -202,6 +202,7 @@ object DeployController {
             .withOptions(l.options)
         ).orNull)
         .withMemory(cd.memory)
+        .withMemoryReservation(cd.memoryReservation)
         .withMountPoints(cd.mountPoints.map(mp =>
           new MountPoint().withContainerPath(mp.containerPath)
             .withSourceVolume(mp.sourceVolume)
