@@ -2,10 +2,12 @@ package ecdc.api
 
 import com.amazonaws.auth.{ AWSCredentials, BasicAWSCredentials }
 import com.amazonaws.regions.{ Region, Regions }
+import com.amazonaws.services.cloudwatchevents._
 import com.amazonaws.services.ecs.AmazonECSAsyncClient
 import com.amazonaws.services.elasticloadbalancing.AmazonElasticLoadBalancingAsyncClient
 import com.amazonaws.services.s3.AmazonS3EncryptionClient
 import com.amazonaws.services.s3.model.{ CryptoConfiguration, KMSEncryptionMaterialsProvider }
+import ecdc.api.notifiers.{ CloudWatchEventsClient, CloudWatchEventsNotifier, DeploymentNotifier }
 import ecdc.core.{ FileSystemTaskDefinitionResolver, TaskDefinitionResolver }
 import ecdc.aws.ecs.EcsClient
 import ecdc.aws.s3.S3EncryptedKeyProvider
@@ -35,10 +37,23 @@ class ApplicationModule extends Module {
     Password(inject[String](identified by "git.password"))
   )
 
+  bind[AmazonCloudWatchEventsAsync] to createEventsClient(
+    inject[AWSCredentials]
+  )
+
+  bind[CloudWatchEventsClient] to new CloudWatchEventsClient(
+    inject[AmazonCloudWatchEventsAsync]
+  )
+
+  bind[DeploymentNotifier] to CloudWatchEventsNotifier(
+    inject[CloudWatchEventsClient]
+  )
+
   bind[DeployController] to new DeployController(
     inject[EcsClient],
     inject[TaskDefinitionResolver],
-    inject[Git]
+    inject[Git],
+    inject[DeploymentNotifier]
   )
 
   bind[SecretKeyProvider] to new S3EncryptedKeyProvider(
@@ -64,6 +79,11 @@ class ApplicationModule extends Module {
     inject[String](identified by "kms.cmk.id"),
     inject[AWSCredentials]
   )
+
+  private def createEventsClient(credentials: AWSCredentials): AmazonCloudWatchEventsAsync = {
+    new AmazonCloudWatchEventsAsyncClient(credentials)
+      .withRegion(Region.getRegion(Regions.EU_WEST_1))
+  }
 
   private def createEcsClient(credentials: AWSCredentials): AmazonECSAsyncClient = {
     new AmazonECSAsyncClient(credentials)
