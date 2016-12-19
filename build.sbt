@@ -42,7 +42,8 @@ lazy val api = project.in(file("src/api"))
     libraryDependencies ++= Seq(
       "commons-codec" % "commons-codec" % "1.10",
       "org.scaldi" %% "scaldi-play" % "0.5.10",
-      "org.scalatest" %% "scalatest" % "2.2.5" % "test"
+      "org.scalatest" %% "scalatest" % "2.2.5" % "test",
+      "com.amazonaws" % "aws-java-sdk-events" % "1.11.29"
     )
   )
 

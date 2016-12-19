@@ -2,8 +2,9 @@ package ecdc.api
 
 import com.amazonaws.services.ecs.model.{ Service => _, _ }
 import com.amazonaws.services.elasticloadbalancing.model.{ HealthCheck => AwsHealthCheck }
-import com.amazonaws.services.elasticloadbalancing.model.{ ConfigureHealthCheckRequest, Listener, CreateLoadBalancerRequest }
+import com.amazonaws.services.elasticloadbalancing.model.{ ConfigureHealthCheckRequest, CreateLoadBalancerRequest, Listener }
 import ecdc.api.DeployController._
+import ecdc.api.notifiers.DeploymentNotifier
 import ecdc.aws.ecs.EcsClient
 import ecdc.core.{ HealthCheck, ServiceConfig, TaskDef, TaskDefinitionResolver }
 import ecdc.git.Git
@@ -18,7 +19,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.language.implicitConversions
 
-class DeployController(ecsClient: EcsClient, configResolver: TaskDefinitionResolver, git: Git) extends Controller {
+class DeployController(ecsClient: EcsClient, configResolver: TaskDefinitionResolver, git: Git, notifier: DeploymentNotifier) extends Controller {
 
   val logger = LoggerFactory.getLogger(getClass)
   implicit val timeout = Timeout(30.seconds)
@@ -39,18 +40,19 @@ class DeployController(ecsClient: EcsClient, configResolver: TaskDefinitionResol
       repoDir <- git.update()
       serviceConfig <- configResolver.resolve(repoDir, cluster, service, version)
       taskDefResult ← ecsClient.registerTaskDef(serviceConfig.taskDefinition)
-      taskDefArn = Arn(taskDefResult.getTaskDefinition.getTaskDefinitionArn)
-      res ← createOrUpdateService(serviceConfig, taskDefArn, cluster, service, version)
+      taskDef = taskDefResult.getTaskDefinition
+      res ← createOrUpdateService(serviceConfig, taskDef, cluster, service, version)
+      res2 <- notifier.success(cluster, service, version, taskDef)
     } yield Ok(s"$service.\n")
   }
 
   def createOrUpdateService(serviceConfig: ServiceConfig,
-    taskDefArn: Arn,
+    taskDef: TaskDefinition,
     cluster: Cluster,
     service: Service,
     version: Version): Future[Unit] = {
 
-    def createOrUpdateInner(dsr: DescribeServiceResult, taskDefArn: Arn): Future[Unit] = {
+    def createOrUpdateInner(dsr: DescribeServiceResult, taskDef: TaskDefinition): Future[Unit] = {
       val desiredCount = serviceConfig.desiredCount
       if (dsr.exists) {
         updateService(service, cluster, desiredCount, dsr.desiredCount)
@@ -64,7 +66,7 @@ class DeployController(ecsClient: EcsClient, configResolver: TaskDefinitionResol
       val usr = new UpdateServiceRequest()
         .withCluster(cluster.name)
         .withService(service.name)
-        .withTaskDefinition(taskDefArn.value)
+        .withTaskDefinition(taskDef.getTaskDefinitionArn)
         .withDesiredCount(getDesiredCount(desiredCount, lastDesiredCount))
       ecsClient.updateService(usr).map(_ => ()) //TODO figure out how to test if deployment went fine
     }
@@ -118,7 +120,7 @@ class DeployController(ecsClient: EcsClient, configResolver: TaskDefinitionResol
       val csr = new CreateServiceRequest()
         .withCluster(cluster.name)
         .withServiceName(service.name)
-        .withTaskDefinition(taskDefArn.value)
+        .withTaskDefinition(taskDef.getTaskDefinitionArn)
         .withDesiredCount(getDesiredCount(desiredCount, lastDesiredCount))
       val loadbalancedContainer = serviceConfig.taskDefinition.getLoadbalancedServiceContainer match {
         case None => serviceConfig.taskDefinition.containerDefinitions.head
@@ -145,14 +147,12 @@ class DeployController(ecsClient: EcsClient, configResolver: TaskDefinitionResol
     for {
       dsr ← ecsClient.describeService(describeServiceRequest(service, cluster))
       result = describeServiceResult(service, cluster, dsr)
-      res ← createOrUpdateInner(result, taskDefArn)
+      res ← createOrUpdateInner(result, taskDef)
     } yield ()
   }
 }
 
 object DeployController {
-
-  case class Arn(value: String) extends AnyVal
 
   case class DescribeServiceResult(service: Service, cluster: Cluster, exists: Boolean, desiredCount: Int)
 
