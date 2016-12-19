@@ -18,7 +18,7 @@ case class CloudWatchEventsNotifier(eventsClient: CloudWatchEventsClient) extend
       "service" -> service.name,
       "version" -> version.value,
       "taskDefinitionArn" -> taskDef.getTaskDefinitionArn,
-      "taskDefinitionRevision" -> taskDef.getRevision.asInstanceOf[String]
+      "taskDefinitionRevision" -> taskDef.getRevision.toString
     ).toString
 
     val event = new PutEventsRequestEntry()
